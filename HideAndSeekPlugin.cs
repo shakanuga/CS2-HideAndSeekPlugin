@@ -13,8 +13,6 @@ using CounterStrikeSharp.API.Modules.Entities;
 using System.Data.SqlTypes;
 using System.Numerics;
 
-
-
 namespace HideAndSeekPlugin;
 
 public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
@@ -24,8 +22,11 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
     public override string ModuleAuthor => "ShookEagle";
 
     public Config Config { get; set; } = new Config();
-    public static HideAndSeekPlugin Instance { get; private set; } = new();
-    public List<CCSPlayerController>? Winners = new List<CCSPlayerController>();
+
+    public static HideAndSeekPlugin Instance { get; private set; }
+
+    public List<CCSPlayerController> Winners = new List<CCSPlayerController>();
+
     public Random Random = new Random();
 
     public override void Load(bool hotReload)
@@ -41,7 +42,9 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
 
     public HookResult Command_Jointeam(CCSPlayerController? player, CommandInfo commandInfo)
     {
-        int arg = Convert.ToInt32(commandInfo.GetArg(1));
+        if (!int.TryParse(commandInfo.GetArg(1), out int arg))
+            return HookResult.Continue;
+
         if (arg == 2 && player != null)
         {
             player.PrintToChat($"[{ChatColors.Blue}{Instance.Config.Prefix}{ChatColors.White}] You cannot join T Team");
@@ -50,8 +53,11 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
         if (arg == 3 && player != null && player.Team != CsTeam.Terrorist)
         {
             player.SwitchTeam(CsTeam.CounterTerrorist);
-            player.PlayerPawn.Value.MaxHealth = 100;
-            player.PlayerPawn.Value.Health = 100;
+            if (player.PlayerPawn?.Value != null)
+            {
+                player.PlayerPawn.Value.MaxHealth = 100;
+                player.PlayerPawn.Value.Health = 100;
+            }
             return HookResult.Continue;
         }
         if (arg == 3 && player != null && player.Team == CsTeam.Terrorist)
@@ -66,31 +72,41 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
     {
         List<CCSPlayerController> allPlayers = Utilities.GetPlayers().Where(p => p.Team != CsTeam.Spectator).ToList();
         List<CCSPlayerController> seekers = new List<CCSPlayerController>();
+
         if (allPlayers.Count < Instance.Config.MinPlayers)
         {
             Server.PrintToChatAll($"[{ChatColors.Blue}{Instance.Config.Prefix}{ChatColors.White}] Minimum {ChatColors.LightBlue}{Instance.Config.MinPlayers}{ChatColors.Default} required to start.");
             return;
         }
-        if (Winners != null)
+
+        if (Winners.Count > 0)
         {
             seekers.AddRange(Winners);
             Winners.Clear();
         }
-        if (seekers.Count < Instance.Config.StartingTs)
+
+        int desiredSeekers = Math.Min(1, allPlayers.Count);
+        if (seekers.Count < desiredSeekers)
         {
-            seekers.AddRange(RandomSeeker(Instance.Config.StartingTs - seekers.Count));
+            seekers.AddRange(RandomSeeker(desiredSeekers - seekers.Count));
         }
+
         foreach (var player in seekers)
         {
             if (player != null)
             {
                 player.SwitchTeam(CsTeam.Terrorist);
                 player.Respawn();
-                player.PlayerPawn.Value.MaxHealth = 9999;
-                player.PlayerPawn.Value.Health = 9999;
+                if (player.PlayerPawn?.Value != null)
+                {
+                    player.PlayerPawn.Value.MaxHealth = 9999;
+                    player.PlayerPawn.Value.Health = 9999;
+                    player.GiveNamedItem("weapon_knife"); // <- Messer beim Rundenstart
+                }
                 Server.PrintToChatAll($"[{ChatColors.Blue}{Instance.Config.Prefix}{ChatColors.White}] {ChatColors.Green}{player.PlayerName}{ChatColors.White} is now seeking.");
             }
         }
+
         seekers.Clear();
     }
 
@@ -98,13 +114,17 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
     {
         List<CCSPlayerController> allPlayers = Utilities.GetPlayers().Where(p => p.Team != CsTeam.Spectator).ToList();
         List<CCSPlayerController> randomplayers = new List<CCSPlayerController>();
+
+        if (allPlayers.Count == 0)
+            return randomplayers;
+
         for (int i = 0; i < num; i++)
         {
             randomplayers.Add(allPlayers[Random.Next(allPlayers.Count)]);
         }
+
         return randomplayers;
     }
-
 
     [GameEventHandler(HookMode.Post)]
     public HookResult OnPlayerDeath(EventPlayerDeath @event, GameEventInfo info)
@@ -120,8 +140,12 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
                 Server.RunOnTickAsync(Server.TickCount + 32, () =>
                 {
                     player.Respawn();
-                    player.PlayerPawn.Value.MaxHealth = 9999;
-                    player.PlayerPawn.Value.Health = 9999;
+                    if (player.PlayerPawn?.Value != null)
+                    {
+                        player.PlayerPawn.Value.MaxHealth = 9999;
+                        player.PlayerPawn.Value.Health = 9999;
+                        player.GiveNamedItem("weapon_knife"); // <- Messer beim Rundenstart
+                    }
                 });
                 return HookResult.Continue;
             }
@@ -131,30 +155,42 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
                 {
                     player.SwitchTeam(CsTeam.Terrorist);
                     player.Respawn();
-                    player.PlayerPawn.Value.MaxHealth = 9999;
-                    player.PlayerPawn.Value.Health = 9999;
+                    if (player.PlayerPawn?.Value != null)
+                    {
+                        player.PlayerPawn.Value.MaxHealth = 9999;
+                        player.PlayerPawn.Value.Health = 9999;
+                        player.GiveNamedItem("weapon_knife"); // <- Messer beim Rundenstart
+                    }
 
                     if (seeker != null && seeker.IsValid)
                     {
                         Server.PrintToChatAll($"[{ChatColors.Blue}{Instance.Config.Prefix}{ChatColors.White}] {ChatColors.Green}{player.PlayerName}{ChatColors.White} was found by {ChatColors.Red}{seeker.PlayerName}{ChatColors.White}");
                     }
-                    else //Crashes Server if no valid attacker -- aka using /slay would kill server :p
+                    else
                     {
                         Server.PrintToChatAll($"[{ChatColors.Blue}{Instance.Config.Prefix}{ChatColors.White}] {ChatColors.Green}{player.PlayerName}{ChatColors.White} was found by the Seekers");
                     }
+
                     List<CCSPlayerController> CtPlayers = allPlayers.Where(c => c.Team == CsTeam.CounterTerrorist).ToList();
-                    if (CtPlayers.Count <= Instance.Config.StartingTs)
+                    if (CtPlayers.Count == 1)
                     {
-                        var winners = CtPlayers.Where(w => w.UserId != player.UserId).ToList();
-                        foreach (var winner in winners)
+                        var lastCT = CtPlayers.First();
+                        if (!Winners.Contains(lastCT))
                         {
-                            if (winner != null)
-                            {
-                                Winners.Add(winner);
-                                Server.PrintToChatAll($"[{ChatColors.Blue}{Instance.Config.Prefix}{ChatColors.White}] {ChatColors.Purple}{winner.PlayerName}{ChatColors.White} has Won and will start as a Seeker.");
-                            }
+                            Winners.Clear();
+                            Winners.Add(lastCT);
+                            Server.PrintToChatAll($"[{ChatColors.Blue}{Instance.Config.Prefix}{ChatColors.White}] {ChatColors.Purple}{lastCT.PlayerName}{ChatColors.White} is the last survivor and may become the next Seeker.");
                         }
-                        Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules").FirstOrDefault()?.GameRules?.TerminateRound(1.0f, RoundEndReason.RoundDraw);
+                    }
+                    else if (CtPlayers.Count == 0)
+                    {
+                        Server.PrintToChatAll($"[{ChatColors.Blue}{Instance.Config.Prefix}{ChatColors.White}] {ChatColors.LightRed}All CTs have been found! Ending round...");
+
+                        Server.RunOnTickAsync(Server.TickCount + 64, () =>
+                        {
+                            Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules")
+                                .FirstOrDefault()?.GameRules?.TerminateRound(1.0f, RoundEndReason.RoundDraw);
+                        });
                     }
                 });
                 return HookResult.Continue;
@@ -166,7 +202,6 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
     [GameEventHandler(HookMode.Post)]
     public HookResult OnRoundPreStart(EventRoundPrestart @event, GameEventInfo info)
     {
-        List<CCSPlayerController> allPlayers = Utilities.GetPlayers().Where(p => p.Team != CsTeam.CounterTerrorist).ToList();
         Find();
         return HookResult.Continue;
     }
@@ -177,25 +212,43 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
         List<CCSPlayerController> allPlayers = Utilities.GetPlayers().Where(p => p.Team == CsTeam.Terrorist).ToList();
         foreach (var player in allPlayers)
         {
-            player.PlayerPawn.Value.MaxHealth = 9999;
-            player.PlayerPawn.Value.Health = 9999;
+            if (player.PlayerPawn?.Value != null)
+            {
+                player.PlayerPawn.Value.MaxHealth = 9999;
+                player.PlayerPawn.Value.Health = 9999;
+                player.GiveNamedItem("weapon_knife"); // <- Messer beim Rundenstart
+            }
         }
-            return HookResult.Continue;
+        return HookResult.Continue;
     }
 
     [GameEventHandler(HookMode.Post)]
     public HookResult OnRoundEnd(EventRoundEnd @event, GameEventInfo info)
     {
         List<CCSPlayerController> allPlayers = Utilities.GetPlayers().Where(p => p.Team != CsTeam.Spectator).ToList();
+        List<CCSPlayerController> ctPlayers = allPlayers.Where(p => p.Team == CsTeam.CounterTerrorist).ToList();
+
+        if (ctPlayers.Count > 1)
+        {
+            var randomCT = ctPlayers[Random.Next(ctPlayers.Count)];
+            Winners.Clear();
+            Winners.Add(randomCT);
+            Server.PrintToChatAll($"[{ChatColors.Blue}{Instance.Config.Prefix}{ChatColors.White}] {ChatColors.Green}{randomCT.PlayerName}{ChatColors.White} survived and will be the next Seeker!");
+        }
+
         foreach (var player in allPlayers)
         {
             if (player != null)
             {
                 player.SwitchTeam(CsTeam.CounterTerrorist);
-                player.PlayerPawn.Value.MaxHealth = 100;
-                player.PlayerPawn.Value.Health = 100;
+                if (player.PlayerPawn?.Value != null)
+                {
+                    player.PlayerPawn.Value.MaxHealth = 100;
+                    player.PlayerPawn.Value.Health = 100;
+                }
             }
         }
+
         return HookResult.Continue;
     }
 
@@ -210,5 +263,3 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
         }
     }
 }
-
-
