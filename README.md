@@ -24,7 +24,7 @@ After first load, a configuration file will be created in
 | --- | --- | --- |
 | hns_prefix | "[HNS]" | Sets The prefix that the plugin uses for messages in chat. |
 | hns_zombie_style | true | Sets the gmae to start with one seeker and everyone they kill joins them. |
-| hns_min_players | 3 | Sets the Minimum players required to start. | 
+| hns_min_players | 3 | Sets the Minimum players required to start. Setting this below 3 will cause issues. | 
 | hns_t_instakills | false | Sets if the Seeker only needs to hit the ct's once to kill them (Currently Not used) |
 | Hns _tr_t_speed | 1 | Sets the Multiplier for The Seekers Speed (Currently Not used) |
 | hns_starting_ts | 1 | Sets the amount of seekers to start with, Zombie mode forces this to 1 (Currently Not used) |
