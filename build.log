@@ -1,0 +1,11 @@
+  Determining projects to restore...
+/home/runner/work/CS2-HideAndSeekPlugin/CS2-HideAndSeekPlugin/HideAndSeekPlugin.csproj : error NU1202: Package CounterStrikeSharp.API 1.0.378 is not compatible with net8.0 (.NETCoreApp,Version=v8.0). Package CounterStrikeSharp.API 1.0.378 supports: net10.0 (.NETCoreApp,Version=v10.0)
+  Failed to restore /home/runner/work/CS2-HideAndSeekPlugin/CS2-HideAndSeekPlugin/HideAndSeekPlugin.csproj (in 731 ms).
+
+Build FAILED.
+
+/home/runner/work/CS2-HideAndSeekPlugin/CS2-HideAndSeekPlugin/HideAndSeekPlugin.csproj : error NU1202: Package CounterStrikeSharp.API 1.0.378 is not compatible with net8.0 (.NETCoreApp,Version=v8.0). Package CounterStrikeSharp.API 1.0.378 supports: net10.0 (.NETCoreApp,Version=v10.0)
+    0 Warning(s)
+    1 Error(s)
+
+Time Elapsed 00:00:04.15
