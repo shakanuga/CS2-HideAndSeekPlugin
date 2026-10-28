@@ -1,0 +1,70 @@
+name: Build and release
+
+# Baut das Plugin und veröffentlicht eine GitHub-Release mit HideAndSeekPlugin.zip,
+# sobald ein Versions-Tag gepusht wird (z. B. "1.2.0"). Der Server-Updater in
+# shakanuga/cs2-modded-server holt sich diese Release dann automatisch.
+#
+# Neue Version: ModuleVersion in HideAndSeekPlugin.cs anheben, committen, dann
+#   git tag 1.2.1 && git push origin 1.2.1
+# oder unter Actions "Run workflow" mit der Versionsnummer starten.
+
+on:
+  push:
+    tags: ['[0-9]*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versionsnummer (wird als Tag angelegt), z. B. 1.2.1'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Version bestimmen
+        id: v
+        run: echo "version=${{ inputs.version || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Bauen
+        run: |
+          set -o pipefail
+          dotnet build HideAndSeekPlugin.csproj -c Release -o build 2>&1 | tee build.log
+
+      - name: Paket schnüren
+        run: |
+          set -euo pipefail
+          mkdir -p pkg/HideAndSeekPlugin
+          cp build/HideAndSeekPlugin.dll build/HideAndSeekPlugin.pdb build/HideAndSeekPlugin.deps.json pkg/HideAndSeekPlugin/
+          (cd pkg && zip -r ../HideAndSeekPlugin.zip HideAndSeekPlugin)
+          unzip -l HideAndSeekPlugin.zip
+
+      - name: Release veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.v.outputs.version }}" HideAndSeekPlugin.zip \
+            --target "${{ github.sha }}" \
+            --title "${{ steps.v.outputs.version }}" \
+            --generate-notes
+
+      # Build-Log bei Fehlern in einen eigenen Branch legen, damit man es auch ohne
+      # Zugriff auf die Actions-Logs lesen kann.
+      - name: Build-Log sichern
+        if: failure()
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout --orphan build-log
+          git rm -rfq --cached .
+          git add -f build.log
+          git commit -qm "Build-Log für ${{ steps.v.outputs.version }}"
+          git push -f origin build-log

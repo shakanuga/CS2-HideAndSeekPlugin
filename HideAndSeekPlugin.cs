@@ -18,7 +18,7 @@ namespace HideAndSeekPlugin;
 public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
 {
     public override string ModuleName => "HideAndSeekPlugin";
-    public override string ModuleVersion => "1.0.0";
+    public override string ModuleVersion => "1.2.0";
     public override string ModuleAuthor => "ShookEagle";
 
     public Config Config { get; set; } = new Config();
@@ -28,6 +28,11 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
     public List<CCSPlayerController> Winners = new List<CCSPlayerController>();
 
     public Random Random = new Random();
+
+    // true, solange eine Runde wegen zu weniger Spieler nicht gestartet werden konnte.
+    // Sobald genug Spieler (auch Bots) da sind, startet CheckAutoStart() die Runde neu.
+    private bool _waitingForPlayers = false;
+    private bool _restartPending = false;
 
     public override void Load(bool hotReload)
     {
@@ -80,17 +85,24 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
         return HookResult.Continue;
     }
 
+    // Spieler, die mitspielen: echte Spieler und Bots, ohne Zuschauer und SourceTV.
+    public static List<CCSPlayerController> ActivePlayers() =>
+        Utilities.GetPlayers()
+            .Where(p => p.IsValid && !p.IsHLTV && p.Team != CsTeam.Spectator)
+            .ToList();
+
     public void Find()
     {
-        List<CCSPlayerController> allPlayers = Utilities.GetPlayers()
-            .Where(p => p.IsValid && p.Team != CsTeam.Spectator)
-            .ToList();
+        _restartPending = false;
+        List<CCSPlayerController> allPlayers = ActivePlayers();
 
         if (allPlayers.Count < Instance.Config.MinPlayers)
         {
-            Server.PrintToChatAll($"[{ChatColors.Blue}{Instance.Config.Prefix}{ChatColors.White}] Minimum {ChatColors.LightBlue}{Instance.Config.MinPlayers}{ChatColors.Default} required to start.");
+            _waitingForPlayers = true;
+            Server.PrintToChatAll($"[{ChatColors.Blue}{Instance.Config.Prefix}{ChatColors.White}] Minimum {ChatColors.LightBlue}{Instance.Config.MinPlayers}{ChatColors.Default} players required to start ({ChatColors.LightBlue}{allPlayers.Count}{ChatColors.Default}/{Instance.Config.MinPlayers}). The round starts automatically once enough players have joined.");
             return;
         }
+        _waitingForPlayers = false;
 
         // Immer mindestens 1 Sucher und mindestens 1 Versteck-Spieler übrig lassen,
         // egal was in der Config für hns_starting_ts steht.
@@ -157,6 +169,10 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
         var player = @event.Userid;
         var seeker = @event.Attacker;
         List<CCSPlayerController> allPlayers = Utilities.GetPlayers();
+
+        // Solange auf Spieler gewartet wird, läuft kein Hide and Seek: niemanden zum Sucher machen.
+        if (_waitingForPlayers)
+            return HookResult.Continue;
 
         if (player != null)
         {
@@ -227,25 +243,48 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
     public CCSGameRules? GameRules =>
         Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules").FirstOrDefault()?.GameRules;
 
-    // Beendet den Warmup automatisch, sobald genug Spieler (inkl. Bots) verbunden sind.
+    // Startet das Spiel automatisch, sobald genug Spieler (inkl. Bots) da sind:
+    // im Warmup wird der Warmup beendet, sonst wird die wartende Runde neu gestartet.
     public void CheckAutoStart()
     {
-        var rules = GameRules;
-        if (rules == null || !rules.WarmupPeriod)
+        if (_restartPending)
             return;
 
-        int connected = Utilities.GetPlayers().Count(p => p.IsValid && !p.IsHLTV);
-        if (connected >= Instance.Config.MinPlayers)
-        {
-            Server.PrintToChatAll($"[{ChatColors.Blue}{Instance.Config.Prefix}{ChatColors.White}] {ChatColors.LightBlue}{connected}{ChatColors.Default} players ready - starting the round!");
-            Server.ExecuteCommand("mp_warmup_end");
-        }
+        var rules = GameRules;
+        if (rules == null)
+            return;
+
+        bool warmup = rules.WarmupPeriod;
+        if (!warmup && !_waitingForPlayers)
+            return;
+
+        int count = ActivePlayers().Count;
+        if (count < Instance.Config.MinPlayers)
+            return;
+
+        _restartPending = true;
+        Server.PrintToChatAll($"[{ChatColors.Blue}{Instance.Config.Prefix}{ChatColors.White}] {ChatColors.LightBlue}{count}{ChatColors.Default} players ready - Hide and Seek starts in 3 seconds!");
+        Server.ExecuteCommand(warmup ? "mp_warmup_end" : "mp_restartgame 3");
+    }
+
+    // Kurz verzögert prüfen, damit Team-Wechsel und Bot-Joins schon übernommen sind.
+    private void CheckAutoStartSoon()
+    {
+        AddTimer(1.0f, CheckAutoStart);
     }
 
     [GameEventHandler(HookMode.Post)]
     public HookResult OnPlayerConnectFull(EventPlayerConnectFull @event, GameEventInfo info)
     {
-        CheckAutoStart();
+        CheckAutoStartSoon();
+        return HookResult.Continue;
+    }
+
+    // Feuert auch für Bots (bot_add), anders als player_connect_full.
+    [GameEventHandler(HookMode.Post)]
+    public HookResult OnPlayerTeam(EventPlayerTeam @event, GameEventInfo info)
+    {
+        CheckAutoStartSoon();
         return HookResult.Continue;
     }
 
@@ -262,6 +301,8 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
             // Server ist leer -> alles zurücksetzen und wieder in den Warmup, damit die
             // nächste Runde sauber neu startet, sobald wieder genug Spieler da sind.
             Winners.Clear();
+            _waitingForPlayers = false;
+            _restartPending = false;
 
             var rules = GameRules;
             if (rules != null && !rules.WarmupPeriod)
@@ -299,6 +340,10 @@ public class HideAndSeekPlugin : BasePlugin, IPluginConfig<Config>
     [GameEventHandler(HookMode.Post)]
     public HookResult OnRoundEnd(EventRoundEnd @event, GameEventInfo info)
     {
+        // Runde lief ohne Hide and Seek (zu wenige Spieler): nichts auswerten.
+        if (_waitingForPlayers)
+            return HookResult.Continue;
+
         List<CCSPlayerController> allPlayers = Utilities.GetPlayers().Where(p => p.Team != CsTeam.Spectator).ToList();
         List<CCSPlayerController> ctPlayers = allPlayers.Where(p => p.Team == CsTeam.CounterTerrorist).ToList();
 
