@@ -45,7 +45,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         if: steps.v.outputs.exists == 'false'
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Bauen
         if: steps.v.outputs.exists == 'false'
