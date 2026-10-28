@@ -1,24 +1,24 @@
 name: Build and release
 
-# Baut das Plugin und veröffentlicht eine GitHub-Release mit HideAndSeekPlugin.zip,
-# sobald ein Versions-Tag gepusht wird (z. B. "1.2.0"). Der Server-Updater in
-# shakanuga/cs2-modded-server holt sich diese Release dann automatisch.
+# Baut das Plugin und veröffentlicht eine GitHub-Release mit HideAndSeekPlugin.zip.
+# Die Version kommt aus ModuleVersion in HideAndSeekPlugin.cs. Bei jedem Push auf
+# main wird geprüft, ob es dafür schon eine Release gibt; wenn nicht, wird gebaut
+# und veröffentlicht. Der Server-Updater in shakanuga/cs2-modded-server holt sich
+# die neue Release dann automatisch.
 #
-# Neue Version: ModuleVersion in HideAndSeekPlugin.cs anheben, committen, dann
-#   git tag 1.2.1 && git push origin 1.2.1
-# oder unter Actions "Run workflow" mit der Versionsnummer starten.
+# Neue Version veröffentlichen: ModuleVersion anheben, committen, pushen. Fertig.
 
 on:
   push:
-    tags: ['[0-9]*']
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Versionsnummer (wird als Tag angelegt), z. B. 1.2.1'
-        required: true
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -26,20 +26,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Version bestimmen
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(grep -oP 'ModuleVersion\s*=>\s*"\K[^"]+' HideAndSeekPlugin.cs)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "$version" >/dev/null 2>&1; then
+            echo "Release $version gibt es schon, nichts zu tun."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Neue Version $version wird gebaut."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-dotnet@v4
+        if: steps.v.outputs.exists == 'false'
         with:
           dotnet-version: '8.0.x'
 
-      - name: Version bestimmen
-        id: v
-        run: echo "version=${{ inputs.version || github.ref_name }}" >> "$GITHUB_OUTPUT"
-
       - name: Bauen
+        if: steps.v.outputs.exists == 'false'
         run: |
           set -o pipefail
           dotnet build HideAndSeekPlugin.csproj -c Release -o build 2>&1 | tee build.log
 
       - name: Paket schnüren
+        if: steps.v.outputs.exists == 'false'
         run: |
           set -euo pipefail
           mkdir -p pkg/HideAndSeekPlugin
@@ -48,6 +63,7 @@ jobs:
           unzip -l HideAndSeekPlugin.zip
 
       - name: Release veröffentlichen
+        if: steps.v.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -56,13 +72,14 @@ jobs:
             --title "${{ steps.v.outputs.version }}" \
             --generate-notes
 
-      # Build-Log bei Fehlern in einen eigenen Branch legen, damit man es auch ohne
+      # Build-Log bei Fehlern in den Branch "build-log" legen, damit man es auch ohne
       # Zugriff auf die Actions-Logs lesen kann.
       - name: Build-Log sichern
         if: failure()
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          touch build.log
           git checkout --orphan build-log
           git rm -rfq --cached .
           git add -f build.log
