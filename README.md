@@ -31,4 +31,4 @@ After first load, a configuration file will be created in
 
 
 The Original Code belongs to ShookEagle: https://github.com/ShookEagle/CS2-HideAndSeekPlugin
-I just tried fixing some stuff with the help of ChatGPT.
+I just fixed some stuff with the help of ChatGPT and Claude.
